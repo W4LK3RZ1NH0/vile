@@ -5,7 +5,7 @@ setup(
     version="1.0.0",
     author="W4LK3R",
     description="Vulnerability & Intelligence Lookup Engine",
-    long_description=open("README.md").read(),
+    long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/W4LK3RZ1NH0/vile",
     packages=find_packages(),
