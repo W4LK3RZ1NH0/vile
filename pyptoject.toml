@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vile"
+version = "1.0.0"
+description = "vile - Vulnerability Scanner"
+dependencies = [
+    "requests",
+]
+
+# Isto diz ao setuptools para olhar para dentro da pasta src/
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Mapeia o comando global apontando para dentro do pacote 'vile'
+[project.scripts]
+vile = "vile.main:main"
