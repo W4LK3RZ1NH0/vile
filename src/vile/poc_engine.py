@@ -1,4 +1,4 @@
-from src.vile import api
+from . import api
 
 def get_replication_link(cve_id):
     """
