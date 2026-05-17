@@ -8,6 +8,10 @@ setup(
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/W4LK3RZ1NH0/vile",
+
+    packages=find_packages(where="src"),
+    package_dir={"": "src"},
+
     packages=find_packages(),
     include_package_data=True,
     install_requires=[
@@ -15,7 +19,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "vile=src.vile.main:main",
+            "vile=vile.main:main",
         ],
     },
     classifiers=[
