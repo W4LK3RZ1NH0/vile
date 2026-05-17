@@ -8,11 +8,11 @@ setup(
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/W4LK3RZ1NH0/vile",
-
+    
+    # Apenas esta linha de packages deve existir:
     packages=find_packages(where="src"),
     package_dir={"": "src"},
-
-    packages=find_packages(),
+    
     include_package_data=True,
     install_requires=[
         "requests>=2.25.0",
