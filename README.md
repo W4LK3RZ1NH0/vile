@@ -10,16 +10,13 @@
 
 ## 🚀 Key Capabilities
 
-
 * **Automated Vulnerability Discovery:** Identifies known CVEs for a given software component and version using the OSV vulnerability database.
-
-* **Exploit & PoC Linking:** Enriches vulnerability results with publicly available proof-of-concept (PoC) and exploit references when available.
-
+* **Exploit & PoC Linking (GitHub-first):** Enriches results with publicly available proof-of-concept (PoC) exploits sourced primarily from **GitHub code search** (ordered by stars for quality), with Nomi-Sec and advisory-reference fallbacks. False-positive filtering rejects pure defensive/advisory repos (mitigation, incident-response, detection-rule) while keeping scanners/exploits.
 * **CWE Classification:** Maps vulnerabilities to their corresponding Common Weakness Enumeration (CWE) categories for structured analysis.
-
-* **Fixed Version Identification:** Extracts and displays the earliest known patched version for each vulnerability when available.
-
+* **Fixed Version Identification:** Extracts the patched version for the **exact target package** (not unrelated libraries/bindings mixed into the same OSV record).
 * **Cross-Source Normalization:** Consolidates and deduplicates vulnerability data across multiple identifiers (CVE, GHSA, and related aliases).
+* **Streaming, banner-first output:** Prints the banner immediately and streams results in batches as they are resolved — no full pre-computation block.
+* **Resilient API handling:** If the OSV API cannot be reached, VILE reports a clear connection error instead of silently showing "no vulnerabilities".
 
 ---
 
@@ -28,7 +25,6 @@
 VILE is packaged to deploy and run instantly on any testing architecture or deployment machine natively through python pip environments.
 
 ### Local Installation (Production/Global Tool)
-To download the metadata build system and register the `vile` executable globally into your system path shell variables:
 ```bash
 pip install git+https://github.com/W4LK3RZ1NH0/vile.git
 ```
@@ -40,19 +36,58 @@ pip install -e .
 ```
 
 ---
-⚠️ PATH Warning Notice: If your terminal returns a Command Not Found error post-installation, ensure your local Python Script environments directory (e.g., ~/.local/bin on Unix/Kali or %APPDATA%\Python\Python312\Scripts on Windows hosts) has been added to your machine's system PATH environmental variables.
+
+⚠️ PATH Warning Notice: If your terminal returns a Command Not Found error post-installation, ensure your local Python Script environments directory (e.g., `~/.local/bin` on Unix/Kali or `%APPDATA%\Python\Python312\Scripts` on Windows hosts) has been added to your machine's system PATH environmental variables.
 
 ---
 
 ## 🕹️ Interactive Command
-Once deployed via pip, the script unbinds from python -m script path routing. It runs globally from any arbitrary file location directory on the machine.
+
+Once deployed via pip, the script unbinds from `python -m` script path routing. It runs globally from any arbitrary file location directory on the machine.
 
 ### Scan Target Infrastructure Components
-Run vulnerability scans against a target component:
+Run vulnerability scans against a target component. **A version (`-v`) is required** — the OSV API needs a version (or ecosystem) to resolve vulnerabilities accurately.
 
 ```bash
-vile postgresql -v 8.5.1
+vile postgresql -v 13.0
 vile log4j -v 2.14.1
+```
+
+> **Case-insensitive:** `WordPress`, `wordpress` and `WORDPRESS` all resolve the same target.
+
+---
+
+## 🎛️ Command-Line Flags
+
+| Flag | Description |
+|------|-------------|
+| `<component>` | Component/package name to scan (positional). Case-insensitive. |
+| `-v, --version` | **Required.** Component version (e.g. `2.14.1`). The OSV API needs a version to resolve vulnerabilities. |
+| `-o, --output FILE` | Write the formatted scan output to `FILE` (it is also still printed to stdout). |
+| `-p, --poc-only` | Show **only** CVEs that have a public proof-of-concept (PoC) link. Respects `--top` (default: 10 with PoC). |
+| `-j, --json` | Emit results as structured JSON instead of human-readable text. |
+| `--top N` | Max number of vulnerabilities to show (default: `10`). Applies in **both** normal and `-p` modes. Use `--top 0` for all. |
+
+### Examples
+
+```bash
+# Version scan (classic) — top 10 by default
+vile log4j -v 2.14.1
+
+# Limit to top 5
+vile log4j -v 2.14.1 --top 5
+
+# Only CVEs with a public PoC (up to 10 by default)
+vile log4j -v 2.14.1 -p
+
+# Only PoCs, limited to top 5
+vile log4j -v 2.14.1 -p --top 5
+
+# Save output to a file
+vile log4j -v 2.14.1 -o scan.txt
+
+# Structured JSON
+vile log4j -v 2.14.1 -j
 ```
 
 ---
@@ -60,36 +95,23 @@ vile log4j -v 2.14.1
 ## 📊 Sample Output
 
 ```
-____      ____  ____  ____              ______   
-|    |    |    ||    ||    |        ___|\     \  
-|    |    |    ||    ||    |       |     \     \ 
-|    |    |    ||    ||    |       |     ,_____/|
-|    |    |    ||    ||    |  ____ |     \--'\_|/
-|    |    |    ||    ||    | |    ||     /___/|  
-|\    \  /    /||    ||    | |    ||     \____|\ 
-| \ ___\/___ / ||____||____|/____/||____ '     /|
- \ |   ||   | / |    ||    |     |||    /_____/ |
-  \|___||___|/  |____||____|_____|/|____|     | /
-   \(    )/      \(    \(    )/      \( |_____|/ 
-    '    '        '     '    '        '    )/    
-                                           '     
                     V I L E
  Vulnerability & Intelligence Lookup Engine
     [ SYSTEM : ONLINE | MODE : RECON ]
 
 ==================================================
-[+] Scanning vulnerabilities for: postgresql (version 8.5.1)
+[+] Scanning vulnerabilities for: postgresql (version 13.0)
 ==================================================
 
-CVE-2015-3165 | NULL Pointer Dereference
- -> SOURCE: [https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2015-3165](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2015-3165)
- -> HOW TO REPLICATE: No public GitHub PoC indexed
- -> FIXED VERSION: 9.4.2
+CVE-2026-6478 | Covert Timing Channel
+ -> SOURCE: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-6478
+ -> HOW TO REPLICATE: https://github.com/fullhunt/log4j-scan
+ -> FIXED VERSION: 13.23
 
-CVE-2014-0060 | Improper Input Validation
- -> SOURCE: [https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2014-0060](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2014-0060)
- -> HOW TO REPLICATE: [https://github.com/exploit-poc/CVE-2014-0060](https://github.com/exploit-poc/CVE-2014-0060)
- -> FIXED VERSION: 9.3.3
+CVE-2026-2003 | Improper Validation of Specified Type of Input
+ -> SOURCE: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-2003
+ -> HOW TO REPLICATE: No public GitHub PoC indexed
+ -> FIXED VERSION: 16.13
 
 [+] Scan completed.
 ```

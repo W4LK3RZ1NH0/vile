@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="vile",
-    version="1.0.0",
+    version="1.1.0",
     author="W4LK3R",
     description="Vulnerability & Intelligence Lookup Engine",
     long_description=open("README.md", encoding="utf-8").read(),

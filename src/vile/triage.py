@@ -1,10 +1,12 @@
 import re
 from .api import fetch_circl_cve_raw, fetch_circl_cwe_name, search_libraries_io
 
-def triage_target(component_input):
+def triage_target(component_input, non_interactive=True):
     """
     Cross-references the user input with Libraries.io.
-    If ecosystem ambiguity arises, prompts the user via an interactive CLI menu.
+    If ecosystem ambiguity arises, auto-selects the most popular match (by stars)
+    instead of prompting interactively — keeps the tool usable in pipelines/CI.
+
     Returns: (target_name, target_ecosystem)
     """
     results = search_libraries_io(component_input)
@@ -30,7 +32,15 @@ def triage_target(component_input):
         print(f"[+] Auto-selected target: {matches[0]['name']} ({matches[0]['ecosystem']})")
         return matches[0]["name"], matches[0]["ecosystem"]
 
-    # Scenario B: Ambiguity (Multiple environments found) -> Open Interactive Prompt
+    # Scenario B: Ambiguity (Multiple environments found).
+    # In non-interactive mode (default), pick the top match by stars automatically.
+    # This avoids blocking on input() in automated runs.
+    if non_interactive:
+        print(f"[!] Multiple environments found for '{component_input}'; "
+              f"auto-selecting most popular: {matches[0]['name']} ({matches[0]['ecosystem']})")
+        return matches[0]["name"], matches[0]["ecosystem"]
+
+    # Interactive fallback (only when explicitly requested, e.g. a human CLI session)
     print(f"\n[!] Multiple environments found for '{component_input}':")
     for idx, match in enumerate(matches, 1):
         print(f"  [{idx}] {match['ecosystem']} -> package: {match['name']} (Stars: {match['stars']})")
@@ -42,8 +52,9 @@ def triage_target(component_input):
         
         if choice_idx < len(matches):
             return matches[choice_idx]["name"], matches[choice_idx]["ecosystem"]
-    except (ValueError, IndexError):
-        print("[!] Invalid selection. Falling back to raw input.")
+    except (ValueError, IndexError, EOFError):
+        # EOFError covers a closed stdin (e.g. redirected input); fall through.
+        print("[!] Invalid selection or no input. Falling back to raw input.")
 
     return component_input, None
 
