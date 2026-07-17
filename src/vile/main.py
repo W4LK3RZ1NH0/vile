@@ -327,13 +327,36 @@ def main(argv=None):
 
     # Query the OSV database. Returns None on connection failure, [] when there
     # are genuinely no vulnerabilities, or a list of raw OSV records.
-    vulnerabilities = api.fetch_osv_vulnerabilities(target_name, ecosystem=target_ecosystem, version=args.version)
+    osv_vulns = api.fetch_osv_vulnerabilities(target_name, ecosystem=target_ecosystem, version=args.version)
 
-    if vulnerabilities is None:
-        # Distinguish "API unreachable" from "no vulnerabilities found".
-        print("[-] CONNECTION ERROR: unable to reach the OSV API after retries.")
+    # Query NVD as a SECOND source. OSV only indexes dependency-ecosystem
+    # packages (npm/PyPI/Packagist/...), so standalone web apps installed by
+    # hand (BoltWire, many CMSs, CTF targets) are missing from OSV but present
+    # in NVD. NVD records are normalized to the same OSV shape in api.py, so the
+    # rest of the pipeline treats both sources identically.
+    nvd_vulns = api.fetch_nvd_vulnerabilities(target_name, version=args.version)
+
+    # Distinguish "both sources failed to connect" from "no vulnerabilities".
+    # Each source returns None only on a genuine connection failure.
+    osv_failed = osv_vulns is None
+    nvd_failed = nvd_vulns is None
+    if osv_failed and nvd_failed:
+        print("[-] CONNECTION ERROR: unable to reach the OSV and NVD APIs after retries.")
         print("[-] Check your network/connectivity. The scanner needs internet access.")
         return 1
+
+    # Merge the two sources, deduplicating by CVE id (OSV records take priority
+    # since they carry richer structured ranges; an NVD record is only added
+    # when its CVE is not already present from OSV).
+    merged = list(osv_vulns) if osv_vulns else []
+    existing_ids = {_extract_cve_id(v) for v in merged}
+    existing_ids.discard(None)
+    for v in (nvd_vulns or []):
+        cve_id = _extract_cve_id(v)
+        if cve_id and cve_id not in existing_ids:
+            merged.append(v)
+            existing_ids.add(cve_id)
+    vulnerabilities = merged
 
     if not vulnerabilities:
         print("[-] No vulnerabilities found for this component/version.")

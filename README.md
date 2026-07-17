@@ -10,13 +10,14 @@
 
 ## 🚀 Key Capabilities
 
-* **Automated Vulnerability Discovery:** Identifies known CVEs for a given software component and version using the OSV vulnerability database.
+* **Dual-source vulnerability discovery (OSV + NVD):** Identifies known CVEs for a given software component and version using **two** databases: the OSV vulnerability database (dependency-ecosystem packages) **and** the NVD (NIST National Vulnerability Database). OSV only indexes packages published to dependency ecosystems (npm, PyPI, Packagist, Go, crates, ...), so standalone web applications installed by hand (e.g. many CMSs and web apps) are absent from it — the NVD source closes that gap. Results from both sources are merged and deduplicated by CVE id.
+* **Structured NVD version matching (no name heuristics):** When querying NVD, VILE filters CVEs using the real **CPE configuration** data (exact version pins and version ranges via `versionStart/End Including/Excluding`), with semantically correct version comparison (so `6.10` > `6.9`). Only CVEs whose structured CPE data actually covers the requested version are reported.
 * **Exploit & PoC Linking (GitHub-first):** Enriches results with publicly available proof-of-concept (PoC) exploits sourced primarily from **GitHub code search** (ordered by stars for quality), with Nomi-Sec and advisory-reference fallbacks. False-positive filtering rejects pure defensive/advisory repos (mitigation, incident-response, detection-rule) while keeping scanners/exploits.
 * **CWE Classification:** Maps vulnerabilities to their corresponding Common Weakness Enumeration (CWE) categories for structured analysis.
-* **Fixed Version Identification:** Extracts the patched version for the **exact target package** (not unrelated libraries/bindings mixed into the same OSV record).
-* **Cross-Source Normalization:** Consolidates and deduplicates vulnerability data across multiple identifiers (CVE, GHSA, and related aliases).
+* **Fixed Version Identification:** Extracts the patched version for the **exact target package** (not unrelated libraries/bindings mixed into the same record).
+* **Cross-Source Normalization:** Consolidates and deduplicates vulnerability data across multiple sources (OSV + NVD) and identifiers (CVE, GHSA, and related aliases).
 * **Streaming, banner-first output:** Prints the banner immediately and streams results in batches as they are resolved — no full pre-computation block.
-* **Resilient API handling:** If the OSV API cannot be reached, VILE reports a clear connection error instead of silently showing "no vulnerabilities".
+* **Resilient API handling:** VILE reports a clear connection error (instead of silently showing "no vulnerabilities") only when **both** the OSV and NVD APIs cannot be reached.
 
 ---
 
@@ -46,11 +47,12 @@ pip install -e .
 Once deployed via pip, the script unbinds from `python -m` script path routing. It runs globally from any arbitrary file location directory on the machine.
 
 ### Scan Target Infrastructure Components
-Run vulnerability scans against a target component. **A version (`-v`) is required** — the OSV API needs a version (or ecosystem) to resolve vulnerabilities accurately.
+Run vulnerability scans against a target component. **A version (`-v`) is required** — the OSV API needs a version (or ecosystem) to resolve vulnerabilities accurately, and it is also used to filter NVD CVEs by their affected version.
 
 ```bash
 vile postgresql -v 13.0
 vile log4j -v 2.14.1
+vile boltwire -v 6.03   # standalone web app: found via the NVD source (not in OSV)
 ```
 
 > **Case-insensitive:** `WordPress`, `wordpress` and `WORDPRESS` all resolve the same target.
@@ -62,7 +64,7 @@ vile log4j -v 2.14.1
 | Flag | Description |
 |------|-------------|
 | `<component>` | Component/package name to scan (positional). Case-insensitive. |
-| `-v, --version` | **Required.** Component version (e.g. `2.14.1`). The OSV API needs a version to resolve vulnerabilities. |
+| `-v, --version` | **Required.** Component version (e.g. `2.14.1`). Used to resolve OSV vulnerabilities and to filter NVD CVEs by affected version. |
 | `-o, --output FILE` | Write the formatted scan output to `FILE` (it is also still printed to stdout). |
 | `-p, --poc-only` | Show **only** CVEs that have a public proof-of-concept (PoC) link. Respects `--top` (default: 10 with PoC). |
 | `-j, --json` | Emit results as structured JSON instead of human-readable text. |

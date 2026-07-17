@@ -165,10 +165,19 @@ class TestOutputFile:
         assert rc == 0
         assert out_file.exists()
         text = out_file.read_text(encoding="utf-8")
-        assert "CVE-2021-44228" in text
-        # Output is also shown on screen.
+        # The file must contain the scan findings (at least one CVE line). We do
+        # not assert a SPECIFIC CVE id: with the NVD source merged in, newer log4j
+        # CVEs can outrank a given one under the newest-first top-N cut. What -o
+        # guarantees is that the on-screen report is faithfully persisted.
+        assert "CVE-" in text
+        # Output is also shown on screen, and the file mirrors it.
         captured = capsys.readouterr().out
-        assert "CVE-2021-44228" in captured
+        assert "CVE-" in captured
+        # Every CVE written to the file was also shown on screen (file == report).
+        import re as _re
+        file_cves = set(_re.findall(r"CVE-\d{4}-\d+", text))
+        screen_cves = set(_re.findall(r"CVE-\d{4}-\d+", captured))
+        assert file_cves and file_cves.issubset(screen_cves)
 
 
 # ---------------------------------------------------------------------------

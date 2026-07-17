@@ -382,6 +382,210 @@ def fetch_osv_vulnerabilities(component, ecosystem=None, version=None):
     return []
 
 
+def _cpe_version_matches(cpe_match, version):
+    """Decide whether `version` falls inside a single NVD cpeMatch entry.
+
+    NVD encodes affected versions in two structured ways inside a cpeMatch:
+      * An exact version pinned in the CPE URI itself
+        (e.g. cpe:2.3:a:boltwire:boltwire:6.03:*:*...), or
+      * A version RANGE via the sibling fields versionStartIncluding /
+        versionStartExcluding / versionEndIncluding / versionEndExcluding.
+
+    We rely ONLY on this structured data (never on name heuristics). Returns
+    True when `version` is covered by the entry, otherwise False. If a range
+    bound cannot be parsed by packaging, we fail safe by ignoring that bound.
+    """
+    if not cpe_match.get("vulnerable", False):
+        return False
+
+    criteria = cpe_match.get("criteria", "")
+    parts = criteria.split(":")
+    # cpe:2.3:a:vendor:product:version:... -> version is field index 5.
+    cpe_version = parts[5] if len(parts) > 5 else "*"
+
+    # Range bounds (any subset may be present).
+    start_inc = cpe_match.get("versionStartIncluding")
+    start_exc = cpe_match.get("versionStartExcluding")
+    end_inc = cpe_match.get("versionEndIncluding")
+    end_exc = cpe_match.get("versionEndExcluding")
+    has_range = any((start_inc, start_exc, end_inc, end_exc))
+
+    # Case 1: no range and the CPE pins an exact version -> exact string match.
+    if not has_range:
+        if cpe_version in ("*", "-", ""):
+            # Wildcard version with no range = "all versions" are affected.
+            return True
+        return cpe_version == version
+
+    # Case 2: a version range. Compare with packaging for correct ordering
+    # (so 6.10 > 6.9), falling back to string compare if parsing fails.
+    try:
+        from packaging.version import parse as _vparse
+        target = _vparse(version)
+
+        def _cmp_ok(bound, op):
+            if bound is None:
+                return True
+            try:
+                b = _vparse(bound)
+            except Exception:
+                return True  # unparsable bound -> ignore it (fail safe)
+            if op == "ge":
+                return target >= b
+            if op == "gt":
+                return target > b
+            if op == "le":
+                return target <= b
+            if op == "lt":
+                return target < b
+            return True
+
+        return (_cmp_ok(start_inc, "ge") and _cmp_ok(start_exc, "gt")
+                and _cmp_ok(end_inc, "le") and _cmp_ok(end_exc, "lt"))
+    except Exception:
+        return True  # if packaging is unavailable, don't drop the CVE
+
+
+def _nvd_version_affected(cve_obj, version):
+    """Return True if `version` is affected per the CVE's NVD CPE configurations.
+
+    Walks every configuration node / cpeMatch and returns True as soon as one
+    structured entry covers the requested version. When a CVE has NO CPE
+    configuration at all (some NVD records omit it), we return True so the CVE
+    is not silently dropped — the keyword search already tied it to the product.
+    """
+    configs = cve_obj.get("configurations", [])
+    if not configs:
+        return True  # no structured data to filter on -> keep it
+
+    saw_any_cpe = False
+    for config in configs:
+        for node in config.get("nodes", []):
+            for cpe_match in node.get("cpeMatch", []):
+                saw_any_cpe = True
+                if _cpe_version_matches(cpe_match, version):
+                    return True
+    # If there were CPE entries but none matched, the version is not affected.
+    return not saw_any_cpe
+
+
+def _nvd_to_osv_record(cve_obj):
+    """Normalize an NVD CVE object into the OSV-like dict the pipeline expects.
+
+    The rest of vile (triage.identify_vulnerability_type, _extract_cve_id,
+    _extract_fix_version, _published_date) reads a specific OSV shape. Rather
+    than special-casing NVD everywhere, we translate an NVD record into that
+    same shape once, here, so downstream code stays source-agnostic. Mapped:
+      * id           <- cve.id
+      * published    <- cve.published (OSV sort key)
+      * modified     <- cve.lastModified
+      * details      <- English description (regex/lexical CWE fallback reads it)
+      * database_specific.cwe_ids <- NVD weaknesses (so triage step 1 works)
+      * affected[].ranges.events.fixed <- versionEndExcluding when present
+    """
+    cve_id = cve_obj.get("id", "")
+
+    # English description -> OSV 'details' (used by triage lexical/regex steps).
+    details = ""
+    for d in cve_obj.get("descriptions", []):
+        if d.get("lang") == "en":
+            details = d.get("value", "")
+            break
+
+    # NVD weaknesses -> cwe_ids (skip the non-informative NVD-CWE-* sentinels).
+    cwe_ids = []
+    for w in cve_obj.get("weaknesses", []):
+        for desc in w.get("description", []):
+            val = desc.get("value", "")
+            if val.startswith("CWE-") and val not in cwe_ids:
+                cwe_ids.append(val)
+
+    # Derive a 'fixed' version from any versionEndExcluding bound (the first
+    # version that is NO LONGER vulnerable == the fix). Wrapped in the OSV
+    # affected/ranges/events shape so _extract_fix_version finds it.
+    fixed_version = None
+    for config in cve_obj.get("configurations", []):
+        for node in config.get("nodes", []):
+            for cpe_match in node.get("cpeMatch", []):
+                if cpe_match.get("versionEndExcluding"):
+                    fixed_version = cpe_match["versionEndExcluding"]
+                    break
+            if fixed_version:
+                break
+        if fixed_version:
+            break
+
+    # Extract the product name from the first CPE to name the affected package.
+    product = ""
+    for config in cve_obj.get("configurations", []):
+        for node in config.get("nodes", []):
+            for cpe_match in node.get("cpeMatch", []):
+                parts = cpe_match.get("criteria", "").split(":")
+                if len(parts) > 4:
+                    product = parts[4]
+                    break
+            if product:
+                break
+        if product:
+            break
+
+    affected_entry = {"package": {"name": product, "ecosystem": "NVD"}}
+    if fixed_version:
+        affected_entry["ranges"] = [{
+            "type": "ECOSYSTEM",
+            "events": [{"introduced": "0"}, {"fixed": fixed_version}],
+        }]
+
+    return {
+        "id": cve_id,
+        "published": cve_obj.get("published", ""),
+        "modified": cve_obj.get("lastModified", ""),
+        "details": details,
+        "database_specific": {"cwe_ids": cwe_ids} if cwe_ids else {},
+        "affected": [affected_entry],
+        "aliases": [],
+        "_source": "NVD",  # provenance tag (informational; ignored downstream)
+    }
+
+
+def fetch_nvd_vulnerabilities(component, version=None):
+    """Query the NVD 2.0 API by product keyword and return OSV-shaped records.
+
+    This is vile's SECOND data source, complementing OSV. OSV only indexes
+    packages published to dependency ecosystems (npm, PyPI, Packagist, ...),
+    so standalone web applications installed by hand (BoltWire, many CMSs,
+    lab/CTF targets) are absent from OSV but present in NVD. Querying NVD by
+    keyword closes that gap.
+
+    Strategy (no name heuristics — only structured NVD data):
+      1. keywordSearch=<component> retrieves CVEs mentioning the product.
+      2. When `version` is given, keep only CVEs whose structured CPE
+         configuration actually covers that version (_nvd_version_affected).
+      3. Normalize each surviving CVE into the OSV shape the pipeline consumes.
+
+    Returns a list of OSV-like records ([] when none match). Returns None on a
+    connection failure so the caller can distinguish "no results" from "API
+    unreachable" (consistent with fetch_osv_vulnerabilities).
+    """
+    url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    params = {"keywordSearch": component, "resultsPerPage": 100}
+    data, status = _get(url, params=params)
+
+    if data is None:
+        # 404 is not expected here; any None with no 4xx status is a conn error.
+        if status is None:
+            return None  # connection failure -> explicit signal
+        return []  # non-200 (e.g. 403/503 rate-limit) -> treat as no results
+
+    records = []
+    for entry in data.get("vulnerabilities", []):
+        cve_obj = entry.get("cve", {})
+        if version and not _nvd_version_affected(cve_obj, version):
+            continue
+        records.append(_nvd_to_osv_record(cve_obj))
+    return records
+
+
 def fetch_circl_cve_raw(cve_id):
     """
     Fetches raw historical JSON intelligence for a specific CVE from the CIRCL API.
